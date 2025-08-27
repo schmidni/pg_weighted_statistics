@@ -1,0 +1,28 @@
+# Custom PostgreSQL container with C extension build capability
+# Extends the postgis/postgis image to add development tools and build the REIA extension
+
+FROM postgis/postgis:16-3.4
+
+# Install development tools and PostgreSQL development headers
+RUN apt-get update && apt-get install -y \
+    build-essential \
+    postgresql-server-dev-16 \
+    git \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create directory for extension source
+RUN mkdir -p /tmp/reia_weighted_stats
+
+# Copy extension source files
+COPY reia_weighted_stats/ /tmp/reia_weighted_stats/
+
+# Build and install the extension
+RUN cd /tmp/reia_weighted_stats && \
+    make clean && \
+    make && \
+    make install && \
+    cd / && \
+    rm -rf /tmp/reia_weighted_stats
+
+# The extension is now available to be created with:
+# CREATE EXTENSION reia_weighted_stats;
