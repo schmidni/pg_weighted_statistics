@@ -1,7 +1,7 @@
-# REIA Weighted Statistics extension
+# Weighted Statistics extension
 comment = 'High-performance weighted statistics functions for sparse data'
 default_version = '1.0.0'
-module_pathname = '$libdir/reia_weighted_stats'
+module_pathname = '$libdir/weighted_statistics'
 relocatable = true
 requires = ''
 superuser = false

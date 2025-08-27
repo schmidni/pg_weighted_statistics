@@ -25,29 +25,29 @@ WITH damage_data AS (
             SELECT
                 tag_name,
                 -- All damage grade statistics using sparse data functions
-                weighted_mean_sparse_c(array_agg(dg1_value),
+                weighted_mean(array_agg(dg1_value),
                     array_agg(weight)) as dg1_mean,
-                weighted_quantile_sparse_c(array_agg(dg1_value),
+                weighted_quantile(array_agg(dg1_value),
                     array_agg(weight), ARRAY[0.1, 0.9]) as dg1_quantiles,
 
-                weighted_mean_sparse_c(array_agg(dg2_value),
+                weighted_mean(array_agg(dg2_value),
                     array_agg(weight)) as dg2_mean,
-                weighted_quantile_sparse_c(array_agg(dg2_value),
+                weighted_quantile(array_agg(dg2_value),
                     array_agg(weight), ARRAY[0.1, 0.9]) as dg2_quantiles,
 
-                weighted_mean_sparse_c(array_agg(dg3_value),
+                weighted_mean(array_agg(dg3_value),
                     array_agg(weight)) as dg3_mean,
-                weighted_quantile_sparse_c(array_agg(dg3_value),
+                weighted_quantile(array_agg(dg3_value),
                     array_agg(weight), ARRAY[0.1, 0.9]) as dg3_quantiles,
 
-                weighted_mean_sparse_c(array_agg(dg4_value),
+                weighted_mean(array_agg(dg4_value),
                     array_agg(weight)) as dg4_mean,
-                weighted_quantile_sparse_c(array_agg(dg4_value),
+                weighted_quantile(array_agg(dg4_value),
                     array_agg(weight), ARRAY[0.1, 0.9]) as dg4_quantiles,
 
-                weighted_mean_sparse_c(array_agg(dg5_value),
+                weighted_mean(array_agg(dg5_value),
                     array_agg(weight)) as dg5_mean,
-                weighted_quantile_sparse_c(array_agg(dg5_value),
+                weighted_quantile(array_agg(dg5_value),
                     array_agg(weight), ARRAY[0.1, 0.9]) as dg5_quantiles
             FROM damage_data
             GROUP BY tag_name

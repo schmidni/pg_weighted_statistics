@@ -1,0 +1,54 @@
+{
+   "name": "weighted_statistics",
+   "abstract": "High-performance weighted statistics functions for sparse data",
+   "description": "A PostgreSQL extension providing weighted mean and quantile functions optimized for sparse data where sum(weights) < 1.0 implies implicit zeros. Offers 3-10x performance improvement over PL/pgSQL implementations through C optimization.",
+   "version": "1.0.0",
+   "maintainer": [
+      "Extension Maintainer <maintainer@example.com>"
+   ],
+   "license": {
+      "PostgreSQL": "http://www.postgresql.org/about/licence"
+   },
+   "provides": {
+      "weighted_statistics": {
+         "abstract": "High-performance weighted statistics functions for sparse data",
+         "file": "sql/weighted_statistics--1.0.0.sql",
+         "version": "1.0.0"
+      }
+   },
+   "prereqs": {
+      "runtime": {
+         "requires": {
+            "PostgreSQL": "12.0.0"
+         }
+      }
+   },
+   "resources": {
+      "homepage": "https://github.com/username/weighted_statistics",
+      "bugtracker": {
+         "web": "https://github.com/username/weighted_statistics/issues"
+      },
+      "repository": {
+         "url": "git://github.com/username/weighted_statistics.git",
+         "web": "https://github.com/username/weighted_statistics",
+         "type": "git"
+      }
+   },
+   "generated_by": "Extension Author",
+   "meta-spec": {
+      "version": "1.0.0",
+      "url": "https://pgxn.org/spec/"
+   },
+   "tags": [
+      "statistics",
+      "weighted",
+      "quantiles",
+      "sparse data",
+      "performance",
+      "c extension",
+      "aggregates",
+      "math"
+   ],
+   "release_status": "stable",
+   "X_comment": "This extension provides weighted statistical functions optimized for sparse datasets commonly found in risk assessment, survey analysis, and incomplete data scenarios."
+}

@@ -1,1 +1,80 @@
+env/
+__pycache__
+
+# PostgreSQL Extension Build Artifacts
+*.o
+*.so
+*.bc
+*.dylib
+*.dll
+*.a
+
+# Build directories
+src/*.o
+src/*.so
+
+# PostgreSQL regression test artifacts
+test/regression.diffs
+test/regression.out
+test/results/
+test/tmp_check/
+
+# Backup files
+*.bak
+*.backup
+*~
+*.orig
+*.rej
+
+# Editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# Temporary files
+*.tmp
+*.temp
+/tmp/
+.tmp/
+
+# OS files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Log files
+*.log
+
+# Distribution archives
+*.tar.gz
+*.zip
+*.tar.bz2
+*.tar.xz
+
+# Python cache (for reference implementation)
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+
+# Installation artifacts (generated during build)
+regression.diffs
+regression.out
+
+# Personal notes and TODO files (except project ones)
+notes.txt
+personal_notes.md
+
+# Local configuration files
+local_config.*
+
+
 CLAUDE.md

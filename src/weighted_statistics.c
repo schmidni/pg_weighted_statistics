@@ -1,11 +1,11 @@
 /*
- * REIA Weighted Statistics C Extension
+ * Weighted Statistics PostgreSQL Extension
  * 
  * High-performance C implementation of weighted mean and quantile functions
- * for sparse data (where sum(weights) < 1.0 implies implicit zeros).
+ * optimized for sparse data (where sum(weights) < 1.0 implies implicit zeros).
  * 
- * This replaces the PL/pgSQL functions with optimized C code for significant
- * performance improvements on large datasets.
+ * All functions in this extension handle sparse data by default, providing
+ * significant performance improvements over PL/pgSQL implementations.
  */
 
 #include "postgres.h"
@@ -18,7 +18,7 @@
 #include <math.h>
 #include <string.h>
 
-/* Version for extension */
+/* PostgreSQL extension module magic */
 PG_MODULE_MAGIC;
 
 /* Data structure for value-weight pairs */
@@ -80,8 +80,11 @@ extract_double_arrays(ArrayType *vals_array, ArrayType *weights_array,
 /* 
  * weighted_mean_sparse_c - C implementation of weighted mean for sparse data
  * 
- * This function calculates the weighted mean where sum(weights) < 1.0 implies
- * implicit zeros in the dataset (sparse data representation).
+ * Calculates the weighted mean where sum(weights) < 1.0 implies implicit zeros
+ * in the dataset. This sparse data representation is useful for incomplete or
+ * sampled datasets where missing values are assumed to be zero.
+ * 
+ * Exposed as: weighted_mean(values[], weights[])
  */
 PG_FUNCTION_INFO_V1(weighted_mean_sparse_c);
 
@@ -135,8 +138,14 @@ weighted_mean_sparse_c(PG_FUNCTION_ARGS)
 /*
  * weighted_quantile_sparse_c - C implementation of weighted quantiles for sparse data
  * 
- * This function calculates weighted quantiles where sum(weights) < 1.0 implies
- * implicit zeros in the dataset. Supports multiple quantiles in a single pass.
+ * Calculates weighted quantiles where sum(weights) < 1.0 implies implicit zeros
+ * in the dataset. This sparse data representation allows efficient processing of
+ * incomplete datasets. Supports multiple quantiles in a single pass for efficiency.
+ * 
+ * Uses linear interpolation for accurate quantile estimation and handles edge cases
+ * gracefully (empty data, single values, boundary quantiles).
+ * 
+ * Exposed as: weighted_quantile(values[], weights[], quantiles[])
  */
 PG_FUNCTION_INFO_V1(weighted_quantile_sparse_c);
 
