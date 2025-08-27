@@ -15,9 +15,6 @@ def weighted_quantile(values, quantiles, weights):
     """
     Calculates Quantiles of a weighted list of samples.
 
-    Implementation for C=0 of:
-    https://en.wikipedia.org/wiki/Percentile#The_weighted_percentile_method
-
     If the sum of the weights is smaller than 1, it is assumed that
     the data is sparse and the remaining data is filled up with 0.
 
@@ -50,7 +47,7 @@ def weighted_quantile(values, quantiles, weights):
 
 def wquantile_generic(values, quantiles, cdf_gen, weights):
     """
-    source: https://aakinshin.net/posts/weighted-quantiles/
+    source: https://aakinshin.net/articles/weighted-quantile-estimators/
     """
     values = np.array(values)
     quantiles = np.array(quantiles)
@@ -79,7 +76,7 @@ def wquantile_generic(values, quantiles, cdf_gen, weights):
 
 def whdquantile(values, quantiles, weights):
     """
-    source: https://aakinshin.net/posts/weighted-quantiles/
+    source: https://aakinshin.net/articles/weighted-quantile-estimators/
     """
     def cdf_gen_whd(n, p):
         return lambda x: beta.cdf(x, (n + 1) * p, (n + 1) * (1 - p))
@@ -88,7 +85,7 @@ def whdquantile(values, quantiles, weights):
 
 def type_7_cdf(quantiles, n, p):
     """
-    source: https://aakinshin.net/posts/weighted-quantiles/
+    source: https://aakinshin.net/articles/weighted-quantile-estimators/
     """
     h = p * (n - 1) + 1
     u = np.maximum((h - 1) / n, np.minimum(h / n, quantiles))
@@ -97,7 +94,7 @@ def type_7_cdf(quantiles, n, p):
 
 def wquantile(values, quantiles, weights):
     """
-    source: https://aakinshin.net/posts/weighted-quantiles/
+    source: https://aakinshin.net/articles/weighted-quantile-estimators/
     """
     def cdf_gen_t7(n, p):
         return lambda x: type_7_cdf(x, n, p)
