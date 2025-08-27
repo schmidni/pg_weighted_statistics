@@ -17,6 +17,7 @@
 #include "access/tupmacs.h"
 #include <math.h>
 #include <string.h>
+#include <stdint.h>
 
 /* PostgreSQL extension module magic */
 PG_MODULE_MAGIC;
@@ -27,6 +28,15 @@ typedef struct {
     double weight;
 } ValueWeight;
 
+/* Structure of Arrays layout for better cache performance */
+typedef struct {
+    double *values;
+    double *weights;
+    int *indices;  /* Original indices for stable sorting */
+    int count;
+    int capacity;
+} ValueWeightArrays;
+
 /* Comparison function for sorting value-weight pairs */
 static int 
 compare_value_weight(const void *a, const void *b) {
@@ -36,6 +46,145 @@ compare_value_weight(const void *a, const void *b) {
     if (vw_a->value < vw_b->value) return -1;
     if (vw_a->value > vw_b->value) return 1;
     return 0;
+}
+
+/* Radix sort for doubles - much faster than qsort for large arrays */
+static void radix_sort_value_weight_pairs(ValueWeight *pairs, int n) {
+    if (n <= 1) return;
+    
+    /* Use radix sort for large arrays, qsort for small ones */
+    if (n < 256) {
+        qsort(pairs, n, sizeof(ValueWeight), compare_value_weight);
+        return;
+    }
+    
+    /* Radix sort implementation for IEEE 754 doubles */
+    ValueWeight *temp = (ValueWeight *)palloc(n * sizeof(ValueWeight));
+    union { double d; uint64_t u; } conv;
+    
+    /* Sort by each byte of the double, from most significant */
+    for (int byte = 7; byte >= 0; byte--) {
+        int count[256] = {0};
+        int shift = byte * 8;
+        
+        /* Count occurrences */
+        for (int i = 0; i < n; i++) {
+            conv.d = pairs[i].value;
+            /* Handle negative numbers by flipping sign bit and all other bits */
+            uint64_t key = conv.u;
+            if (key & 0x8000000000000000ULL) {
+                key = ~key;
+            } else {
+                key |= 0x8000000000000000ULL;
+            }
+            count[(key >> shift) & 0xFF]++;
+        }
+        
+        /* Calculate positions */
+        for (int i = 1; i < 256; i++) {
+            count[i] += count[i-1];
+        }
+        
+        /* Place elements in sorted order */
+        for (int i = n - 1; i >= 0; i--) {
+            conv.d = pairs[i].value;
+            uint64_t key = conv.u;
+            if (key & 0x8000000000000000ULL) {
+                key = ~key;
+            } else {
+                key |= 0x8000000000000000ULL;
+            }
+            int bucket = (key >> shift) & 0xFF;
+            temp[--count[bucket]] = pairs[i];
+        }
+        
+        /* Copy back */
+        memcpy(pairs, temp, n * sizeof(ValueWeight));
+    }
+    
+    pfree(temp);
+}
+
+/* Counting sort for when value range is small */
+static void counting_sort_value_weight_pairs(ValueWeight *pairs, int n) {
+    if (n <= 1) return;
+    
+    /* Find min and max values */
+    double min_val = pairs[0].value;
+    double max_val = pairs[0].value;
+    
+    for (int i = 1; i < n; i++) {
+        if (pairs[i].value < min_val) min_val = pairs[i].value;
+        if (pairs[i].value > max_val) max_val = pairs[i].value;
+    }
+    
+    double range = max_val - min_val;
+    
+    /* Use counting sort only if range is reasonable */
+    if (range <= 0 || range > 10000 || range != floor(range)) {
+        /* Fall back to radix sort */
+        radix_sort_value_weight_pairs(pairs, n);
+        return;
+    }
+    
+    int range_int = (int)range + 1;
+    int *count = (int *)palloc0(range_int * sizeof(int));
+    ValueWeight *temp = (ValueWeight *)palloc(n * sizeof(ValueWeight));
+    
+    /* Count occurrences */
+    for (int i = 0; i < n; i++) {
+        int bucket = (int)(pairs[i].value - min_val);
+        count[bucket]++;
+    }
+    
+    /* Calculate positions */
+    for (int i = 1; i < range_int; i++) {
+        count[i] += count[i-1];
+    }
+    
+    /* Place elements */
+    for (int i = n - 1; i >= 0; i--) {
+        int bucket = (int)(pairs[i].value - min_val);
+        temp[--count[bucket]] = pairs[i];
+    }
+    
+    /* Copy back */
+    memcpy(pairs, temp, n * sizeof(ValueWeight));
+    
+    pfree(count);
+    pfree(temp);
+}
+
+/* Intelligent sorting dispatch */
+static void optimized_sort_value_weight_pairs(ValueWeight *pairs, int n) {
+    if (n <= 1) return;
+    
+    /* For small arrays, use standard qsort */
+    if (n < 32) {
+        qsort(pairs, n, sizeof(ValueWeight), compare_value_weight);
+        return;
+    }
+    
+    /* Analyze value distribution to choose best algorithm */
+    double min_val = pairs[0].value;
+    double max_val = pairs[0].value;
+    bool all_integers = true;
+    
+    for (int i = 0; i < n; i++) {
+        if (pairs[i].value < min_val) min_val = pairs[i].value;
+        if (pairs[i].value > max_val) max_val = pairs[i].value;
+        if (pairs[i].value != floor(pairs[i].value)) all_integers = false;
+    }
+    
+    double range = max_val - min_val;
+    
+    /* Use counting sort for small integer ranges */
+    if (all_integers && range > 0 && range <= 1000 && n > 100) {
+        counting_sort_value_weight_pairs(pairs, n);
+    } else {
+        /* Use radix sort for everything else */
+        radix_sort_value_weight_pairs(pairs, n);
+    }
 }
 
 /* Utility function to extract double arrays from PostgreSQL arrays */
@@ -215,10 +364,12 @@ weighted_quantile_sparse_c(PG_FUNCTION_ARGS)
         PG_RETURN_ARRAYTYPE_P(result_array);
     }
     
+    /* Pre-allocate for worst case: all elements + 1 for sparse data */
+    vw_pairs = (ValueWeight *)palloc((n_elements + 1) * sizeof(ValueWeight));
+    
     /* Create value-weight pairs for non-zero weights */
-    vw_pairs = (ValueWeight *)palloc(n_elements * sizeof(ValueWeight));
     for (i = 0; i < n_elements; i++) {
-        if (weights[i] > 0.0) {
+        if (__builtin_expect(weights[i] > 0.0, 1)) {
             vw_pairs[n_pairs].value = vals[i];
             vw_pairs[n_pairs].weight = weights[i];
             total_weight += weights[i];
@@ -228,53 +379,72 @@ weighted_quantile_sparse_c(PG_FUNCTION_ARGS)
     
     /* Handle sparse data: add implicit zero if total weight < 1.0 */
     if (total_weight < 1.0) {
-        vw_pairs = (ValueWeight *)repalloc(vw_pairs, (n_pairs + 1) * sizeof(ValueWeight));
         vw_pairs[n_pairs].value = 0.0;
         vw_pairs[n_pairs].weight = 1.0 - total_weight;
         n_pairs++;
         total_weight = 1.0;
     }
     
-    /* Sort by value */
-    qsort(vw_pairs, n_pairs, sizeof(ValueWeight), compare_value_weight);
+    /* Sort by value using optimized algorithm */
+    optimized_sort_value_weight_pairs(vw_pairs, n_pairs);
     
-    /* Calculate quantiles */
+    /* Single-pass quantile calculation - much more efficient */
     result_datums = (Datum *)palloc(n_quantiles * sizeof(Datum));
     
+    /* Pre-compute cumulative weights */
+    double *cumulative_weights = (double *)palloc(n_pairs * sizeof(double));
+    double cumsum = 0.0;
+    for (i = 0; i < n_pairs; i++) {
+        cumsum += vw_pairs[i].weight;
+        cumulative_weights[i] = cumsum;
+    }
+    
+    /* Calculate all quantiles in single pass */
     for (q_idx = 0; q_idx < n_quantiles; q_idx++) {
         double q = quantiles[q_idx];
         double target_weight = q * total_weight;
-        double cumsum = 0.0;
-        double result_value = 0.0;
+        double result_value;
         
-        /* Handle edge cases */
-        if (q <= 0.0 || target_weight <= vw_pairs[0].weight) {
+        /* Handle edge cases first */
+        if (q <= 0.0) {
             result_value = vw_pairs[0].value;
         } else if (q >= 1.0) {
             result_value = vw_pairs[n_pairs - 1].value;
+        } else if (target_weight <= vw_pairs[0].weight) {
+            result_value = vw_pairs[0].value;
         } else {
-            /* Find position using cumulative sum */
-            for (i = 0; i < n_pairs; i++) {
-                double prev_cumsum = cumsum;
-                cumsum += vw_pairs[i].weight;
-                
-                if (cumsum >= target_weight) {
-                    if (i == 0 || cumsum == target_weight) {
-                        result_value = vw_pairs[i].value;
-                    } else {
-                        /* Linear interpolation */
-                        double lower_val = vw_pairs[i-1].value;
-                        double upper_val = vw_pairs[i].value;
-                        double interp_factor = (target_weight - prev_cumsum) / vw_pairs[i].weight;
-                        result_value = lower_val + interp_factor * (upper_val - lower_val);
-                    }
-                    break;
+            /* Binary search for efficiency with many quantiles */
+            int left = 0, right = n_pairs - 1;
+            int pos = n_pairs - 1;
+            
+            /* Find position where cumulative_weight >= target_weight */
+            while (left <= right) {
+                int mid = (left + right) / 2;
+                if (cumulative_weights[mid] >= target_weight) {
+                    pos = mid;
+                    right = mid - 1;
+                } else {
+                    left = mid + 1;
                 }
+            }
+            
+            if (pos == 0 || cumulative_weights[pos] == target_weight) {
+                result_value = vw_pairs[pos].value;
+            } else {
+                /* Linear interpolation */
+                double prev_cumsum = cumulative_weights[pos - 1];
+                double curr_cumsum = cumulative_weights[pos];
+                double lower_val = vw_pairs[pos - 1].value;
+                double upper_val = vw_pairs[pos].value;
+                double interp_factor = (target_weight - prev_cumsum) / (curr_cumsum - prev_cumsum);
+                result_value = lower_val + interp_factor * (upper_val - lower_val);
             }
         }
         
         result_datums[q_idx] = Float8GetDatum(result_value);
     }
+    
+    pfree(cumulative_weights);
     
     /* Create result array */
     result_array = construct_array(result_datums, n_quantiles, FLOAT8OID,

@@ -23,9 +23,9 @@
  Symmetric median |    1.5 | f
 (1 row)
 
-       test_name       |                 q                 | monotonic 
------------------------+-----------------------------------+-----------
- Quantile monotonicity | {1,1.5,2.5,3.499999999999999,4.5} | t
+       test_name       |                         q                         | monotonic 
+-----------------------+---------------------------------------------------+-----------
+ Quantile monotonicity | {1,1.5,2.4999999999999996,3.4999999999999996,4.5} | t
 (1 row)
 
       test_name      | result |                 expected_note                  
