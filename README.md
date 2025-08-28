@@ -31,7 +31,7 @@ SELECT weighted_quantile(ARRAY[10.0, 20.0, 30.0], ARRAY[0.3, 0.4, 0.3], ARRAY[0.
 
 ## Key Features
 
-- **3-10x faster** than PL/pgSQL implementations
+- **up to 14x faster** than PL/pgSQL implementations
 - **Sparse data handling**: Automatically adds implicit zeros when `sum(weights) < 1.0`
 - **Mathematically validated**: 100% accuracy against Python reference implementations
 
@@ -86,10 +86,15 @@ make installcheck
 
 ## Performance
 
-- **3-10x faster** than PL/pgSQL implementations
-- **Linear scaling** with array size 
-- **Sub-millisecond execution** for typical datasets
-- **Compiled with** `-O3 -march=native -ffast-math` optimizations
+Benchmarked results (5-iteration averages) show significant performance advantages:
+
+- **up to 14x faster** than optimized PL/pgSQL (varies by function and array size)
+- **Sub-millisecond to millisecond execution**: 0.06ms (1K quantiles) to 18.77ms (100K mean PL/pgSQL)  
+- **Quantiles show biggest gains**: Consistent 12-14x faster than PL/pgSQL across all sizes
+- **Mean functions scale differently**: Equal at 1K elements, 4x faster at 100K elements
+- **Efficient quantile methods**: Empirical CDF fastest, Type 7 ~1.7x slower, Harrell-Davis 25-33x slower
+
+For more details, see the [benchmark/README.md](benchmark/README.md).
 
 ## Development & Testing
 
