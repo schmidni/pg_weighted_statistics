@@ -13,7 +13,8 @@ from typing import Any, Dict, List, Tuple
 import numpy as np
 import psycopg2
 import psycopg2.extras
-from weighted_quantile import add_missing_zeroes, weighted_quantile
+from weighted_quantile import weighted_quantile, wquantile, whdquantile
+from weighted_stats import weighted_mean, weighted_variance, weighted_std
 
 
 def connect_to_postgres(host='localhost', port=5432, database='postgres',
@@ -31,19 +32,6 @@ def connect_to_postgres(host='localhost', port=5432, database='postgres',
         sys.exit(1)
 
 
-def weighted_mean_reference(values: np.ndarray, weights: np.ndarray) -> float:
-    """Reference implementation of weighted mean for sparse data."""
-    if len(values) == 0 or len(weights) == 0:
-        return 0.0
-
-    # Handle sparse data
-    sum_weights = np.sum(weights)
-    if sum_weights < 1.0:
-        values, weights = add_missing_zeroes(values, weights)
-
-    # Calculate weighted mean
-    weighted_sum = np.sum(values * weights)
-    return float(weighted_sum)
 
 
 def test_weighted_mean(cursor,
@@ -58,7 +46,7 @@ def test_weighted_mean(cursor,
         weights = np.array(case['weights'])
 
         # Get reference result
-        ref_result = weighted_mean_reference(values, weights)
+        ref_result = weighted_mean(values, weights)
 
         # Get PostgreSQL result
         cursor.execute(
@@ -253,7 +241,277 @@ def generate_test_cases() -> Tuple[List[Dict], List[Dict]]:
         }
     ]
 
-    return mean_cases, quantile_cases
+    # Variance/std test cases
+    variance_cases = [
+        {
+            'name': 'Basic variance (population)',
+            'values': [1.0, 2.0, 3.0, 4.0, 5.0],
+            'weights': [0.2, 0.2, 0.2, 0.2, 0.2],
+            'ddof': 0
+        },
+        {
+            'name': 'Basic variance (sample)',
+            'values': [1.0, 2.0, 3.0, 4.0, 5.0],
+            'weights': [0.2, 0.2, 0.2, 0.2, 0.2],
+            'ddof': 1
+        },
+        {
+            'name': 'Sparse data variance',
+            'values': [10.0, 20.0],
+            'weights': [0.3, 0.2],
+            'ddof': 0
+        },
+        {
+            'name': 'Single value variance',
+            'values': [5.0],
+            'weights': [0.3],
+            'ddof': 0
+        },
+        {
+            'name': 'Zero variance data',
+            'values': [5.0, 5.0, 5.0],
+            'weights': [0.3, 0.3, 0.3],
+            'ddof': 0
+        },
+        {
+            'name': 'High ddof (should return NaN)',
+            'values': [1.0, 2.0],
+            'weights': [0.5, 0.5],
+            'ddof': 5
+        }
+    ]
+
+    return mean_cases, quantile_cases, variance_cases
+
+
+def test_wquantile(cursor, test_cases: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Test wquantile function against reference implementation."""
+    results = []
+
+    for i, case in enumerate(test_cases):
+        name = case['name']
+        values = np.array(case['values'])
+        weights = np.array(case['weights'])
+        quantiles = np.array(case['quantiles'])
+
+        # Get reference result
+        ref_result = wquantile(values, quantiles, weights)
+
+        # Get PostgreSQL result
+        cursor.execute(
+            "SELECT wquantile(%s, %s, %s) AS result",
+            (values.tolist(), weights.tolist(), quantiles.tolist())
+        )
+        pg_result = np.array(cursor.fetchone()['result'])
+
+        # Compare results
+        tolerance = case.get('tolerance', 1e-6)
+        diffs = np.abs(ref_result - pg_result)
+        max_diff = np.max(diffs)
+        passed = max_diff < tolerance
+
+        results.append({
+            'test_id': i + 1,
+            'name': name,
+            'reference_result': ref_result,
+            'postgres_result': pg_result.tolist(),
+            'max_difference': float(max_diff),
+            'tolerance': tolerance,
+            'passed': passed
+        })
+
+        status = "PASS" if passed else "FAIL"
+        print(f"Test {i+1}: {name} - {status}")
+        if not passed:
+            print(f"  Max difference: {max_diff}")
+            print(f"  Reference: {ref_result}")
+            print(f"  PostgreSQL: {pg_result}")
+
+    return results
+
+
+def test_whdquantile(cursor, test_cases: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Test whdquantile function against reference implementation."""
+    results = []
+
+    for i, case in enumerate(test_cases):
+        name = case['name']
+        values = np.array(case['values'])
+        weights = np.array(case['weights'])
+        quantiles = np.array(case['quantiles'])
+
+        # Get reference result
+        ref_result = np.array(whdquantile(values, quantiles, weights))
+
+        # Get PostgreSQL result
+        cursor.execute(
+            "SELECT whdquantile(%s, %s, %s) AS result",
+            (values.tolist(), weights.tolist(), quantiles.tolist())
+        )
+        pg_result = np.array(cursor.fetchone()['result'])
+
+        # Compare results
+        # HD quantile needs higher tolerance due to Beta CDF approximation
+        tolerance = case.get('tolerance', 1e-6)  # Back to standard tolerance now that Beta CDF is accurate
+        
+        # Handle NaN values properly - both returning NaN is a pass
+        ref_nans = np.isnan(ref_result)
+        pg_nans = np.isnan(pg_result)
+        
+        if np.array_equal(ref_nans, pg_nans):
+            # NaN positions match
+            if np.all(ref_nans):
+                # All values are NaN - this is a pass
+                passed = True
+                max_diff = 0.0
+            else:
+                # Compare non-NaN values
+                valid_mask = ~ref_nans
+                if np.any(valid_mask):
+                    diffs = np.abs(ref_result[valid_mask] - pg_result[valid_mask])
+                    max_diff = np.max(diffs)
+                    passed = max_diff < tolerance
+                else:
+                    # No valid values (shouldn't happen if not all NaN)
+                    passed = True
+                    max_diff = 0.0
+        else:
+            # NaN positions don't match - fail
+            passed = False
+            max_diff = float('inf')
+
+        results.append({
+            'test_id': i + 1,
+            'name': name,
+            'reference_result': ref_result,
+            'postgres_result': pg_result.tolist(),
+            'max_difference': float(max_diff),
+            'tolerance': tolerance,
+            'passed': passed
+        })
+
+        status = "PASS" if passed else "FAIL"
+        print(f"Test {i+1}: {name} - {status}")
+        if not passed:
+            print(f"  Max difference: {max_diff}")
+            print(f"  Reference: {ref_result}")
+            print(f"  PostgreSQL: {pg_result}")
+
+    return results
+
+
+def test_weighted_variance(cursor, test_cases: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Test weighted_variance function against reference implementation."""
+    results = []
+
+    for i, case in enumerate(test_cases):
+        name = case['name']
+        values = np.array(case['values'])
+        weights = np.array(case['weights'])
+        ddof = case.get('ddof', 0)
+
+        # Get reference result
+        ref_result = weighted_variance(values, weights, ddof=ddof)
+
+        # Get PostgreSQL result
+        cursor.execute(
+            "SELECT weighted_variance(%s, %s, %s) AS result",
+            (values.tolist(), weights.tolist(), ddof)
+        )
+        pg_result = cursor.fetchone()['result']
+        
+        # Handle NULL results from PostgreSQL (when n_eff <= ddof)
+        if pg_result is None:
+            pg_result = float('nan')
+
+        # Compare results
+        tolerance = case.get('tolerance', 1e-10)
+        
+        # Handle NaN comparison
+        if np.isnan(ref_result) and np.isnan(pg_result):
+            passed = True
+            diff = 0.0
+        elif np.isnan(ref_result) or np.isnan(pg_result):
+            passed = False
+            diff = float('inf')
+        else:
+            diff = abs(ref_result - pg_result)
+            passed = diff < tolerance
+
+        results.append({
+            'test_id': i + 1,
+            'name': name,
+            'reference_result': ref_result,
+            'postgres_result': pg_result,
+            'difference': diff,
+            'tolerance': tolerance,
+            'passed': passed,
+            'ddof': ddof
+        })
+
+        status = "PASS" if passed else "FAIL"
+        print(f"Test {i+1}: {name} (ddof={ddof}) - {status}")
+        if not passed:
+            print(f"  Expected: {ref_result}, Got: {pg_result}, Diff: {diff}")
+
+    return results
+
+
+def test_weighted_std(cursor, test_cases: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Test weighted_std function against reference implementation."""
+    results = []
+
+    for i, case in enumerate(test_cases):
+        name = case['name']
+        values = np.array(case['values'])
+        weights = np.array(case['weights'])
+        ddof = case.get('ddof', 0)
+
+        # Get reference result
+        ref_result = weighted_std(values, weights, ddof=ddof)
+
+        # Get PostgreSQL result
+        cursor.execute(
+            "SELECT weighted_std(%s, %s, %s) AS result",
+            (values.tolist(), weights.tolist(), ddof)
+        )
+        pg_result = cursor.fetchone()['result']
+        
+        # Handle NULL results from PostgreSQL (when n_eff <= ddof)
+        if pg_result is None:
+            pg_result = float('nan')
+
+        # Compare results
+        tolerance = case.get('tolerance', 1e-10)
+        
+        # Handle NaN comparison
+        if np.isnan(ref_result) and np.isnan(pg_result):
+            passed = True
+            diff = 0.0
+        elif np.isnan(ref_result) or np.isnan(pg_result):
+            passed = False
+            diff = float('inf')
+        else:
+            diff = abs(ref_result - pg_result)
+            passed = diff < tolerance
+
+        results.append({
+            'test_id': i + 1,
+            'name': name,
+            'reference_result': ref_result,
+            'postgres_result': pg_result,
+            'difference': diff,
+            'tolerance': tolerance,
+            'passed': passed,
+            'ddof': ddof
+        })
+
+        status = "PASS" if passed else "FAIL"
+        print(f"Test {i+1}: {name} (ddof={ddof}) - {status}")
+        if not passed:
+            print(f"  Expected: {ref_result}, Got: {pg_result}, Diff: {diff}")
+
+    return results
 
 
 def validate_mathematical_properties(cursor) -> List[Dict[str, Any]]:
@@ -412,7 +670,7 @@ def main():
         sys.exit(1)
 
     # Generate test cases
-    mean_cases, quantile_cases = generate_test_cases()
+    mean_cases, quantile_cases, variance_cases = generate_test_cases()
 
     # Run weighted_mean tests
     print(f"\nTesting weighted_mean function ({len(mean_cases)} tests):")
@@ -424,6 +682,30 @@ def main():
         f"\nTesting weighted_quantile function ({len(quantile_cases)} tests):")
     print("-" * 35)
     quantile_results = test_weighted_quantile(cursor, quantile_cases)
+    
+    # Run wquantile tests
+    print(
+        f"\nTesting wquantile function ({len(quantile_cases)} tests):")
+    print("-" * 35)
+    wquantile_results = test_wquantile(cursor, quantile_cases)
+    
+    # Run whdquantile tests
+    print(
+        f"\nTesting whdquantile function ({len(quantile_cases)} tests):")
+    print("-" * 35)
+    whdquantile_results = test_whdquantile(cursor, quantile_cases)
+    
+    # Run weighted_variance tests
+    print(
+        f"\nTesting weighted_variance function ({len(variance_cases)} tests):")
+    print("-" * 35)
+    variance_results = test_weighted_variance(cursor, variance_cases)
+    
+    # Run weighted_std tests
+    print(
+        f"\nTesting weighted_std function ({len(variance_cases)} tests):")
+    print("-" * 35)
+    std_results = test_weighted_std(cursor, variance_cases)
 
     # Run mathematical property validation tests
     print("\nTesting mathematical properties:")
@@ -437,9 +719,12 @@ def main():
             print(f"  Details: {result['details']}")
 
     # Summary
-    total_tests = len(mean_results) + \
-        len(quantile_results) + len(property_results)
-    passed_tests = (sum(r['passed'] for r in mean_results + quantile_results) +
+    total_tests = (len(mean_results) + len(quantile_results) + len(wquantile_results) + 
+                   len(whdquantile_results) + len(variance_results) + 
+                   len(std_results) + len(property_results))
+    passed_tests = (sum(r['passed'] for r in mean_results + quantile_results + 
+                        wquantile_results + whdquantile_results + 
+                        variance_results + std_results) +
                     sum(r['passed'] for r in property_results))
     failed_tests = total_tests - passed_tests
 

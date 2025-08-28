@@ -7,11 +7,11 @@
 EXTENSION = weighted_statistics
 DATA = sql/weighted_statistics--1.0.0.sql
 MODULE_big = weighted_statistics
-OBJS = src/weighted_statistics.o
+OBJS = src/utils.o src/weighted_mean.o src/weighted_quantiles.o src/weighted_variance.o
 
 # Compiler optimization flags for performance
-PG_CPPFLAGS = -O3 -march=native -ffast-math -funroll-loops
-PG_LDFLAGS = 
+PG_CPPFLAGS = -O2 -funroll-loops
+PG_LDFLAGS = -lm 
 
 # Regression tests
 REGRESS = basic_tests accuracy_tests performance_tests
