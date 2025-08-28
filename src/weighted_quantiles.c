@@ -15,9 +15,6 @@
 #include "catalog/pg_type.h"
 #include <math.h>
 #include <string.h>
-#ifndef NAN
-#define NAN (0.0/0.0)
-#endif
 
 #include "utils.h"
 
@@ -42,7 +39,7 @@ static double beta_cdf(double x, double a, double b) {
     /* Check for invalid parameters */
     if (a <= 0.0 || b <= 0.0) {
         /* Return NaN for invalid parameters */
-        return 0.0 / 0.0;
+        return NAN;
     }
     
     /* The continued fraction converges nicely for x < (a+1)/(a+b+2) */
@@ -83,7 +80,7 @@ static double beta_cdf(double x, double a, double b) {
     }
     
     /* Did not converge, return NaN */
-    return 0.0 / 0.0;
+    return NAN;
 }
 
 /*
@@ -143,6 +140,13 @@ weighted_quantile_sparse_c(PG_FUNCTION_ARGS)
     quantiles = (double *)palloc(n_quantiles * sizeof(double));
     for (i = 0; i < n_quantiles; i++) {
         quantiles[i] = q_nulls[i] ? 0.0 : DatumGetFloat8(q_datums[i]);
+        /* Validate quantile values */
+        if (quantiles[i] < 0.0 || quantiles[i] > 1.0 || isnan(quantiles[i]) || isinf(quantiles[i])) {
+            pfree(quantiles);
+            ereport(ERROR,
+                    (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                     errmsg("quantile values must be between 0 and 1")));
+        }
     }
     
     /* Extract value and weight arrays */
@@ -310,6 +314,13 @@ wquantile_sparse_c(PG_FUNCTION_ARGS)
     quantiles = (double *)palloc(n_quantiles * sizeof(double));
     for (i = 0; i < n_quantiles; i++) {
         quantiles[i] = q_nulls[i] ? 0.0 : DatumGetFloat8(q_datums[i]);
+        /* Validate quantile values */
+        if (quantiles[i] < 0.0 || quantiles[i] > 1.0 || isnan(quantiles[i]) || isinf(quantiles[i])) {
+            pfree(quantiles);
+            ereport(ERROR,
+                    (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                     errmsg("quantile values must be between 0 and 1")));
+        }
     }
     
     /* Extract value and weight arrays */
@@ -476,6 +487,13 @@ whdquantile_sparse_c(PG_FUNCTION_ARGS)
     quantiles = (double *)palloc(n_quantiles * sizeof(double));
     for (i = 0; i < n_quantiles; i++) {
         quantiles[i] = q_nulls[i] ? 0.0 : DatumGetFloat8(q_datums[i]);
+        /* Validate quantile values */
+        if (quantiles[i] < 0.0 || quantiles[i] > 1.0 || isnan(quantiles[i]) || isinf(quantiles[i])) {
+            pfree(quantiles);
+            ereport(ERROR,
+                    (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                     errmsg("quantile values must be between 0 and 1")));
+        }
     }
     
     /* Extract value and weight arrays */

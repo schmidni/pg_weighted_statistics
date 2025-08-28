@@ -54,12 +54,14 @@ static void radix_sort_value_weight_pairs(ValueWeight *pairs, int n) {
         /* Count occurrences */
         for (i = 0; i < n; i++) {
             conv.d = pairs[i].value;
-            /* Handle negative numbers by flipping sign bit and all other bits */
             key = conv.u;
+            /* Transform IEEE 754 bit pattern for correct radix sort ordering:
+             * - For negative numbers (sign bit set): flip all bits
+             * - For positive numbers (sign bit clear): flip only sign bit */
             if (key & 0x8000000000000000ULL) {
                 key = ~key;
             } else {
-                key |= 0x8000000000000000ULL;
+                key ^= 0x8000000000000000ULL;
             }
             count[(key >> shift) & 0xFF]++;
         }
@@ -76,7 +78,7 @@ static void radix_sort_value_weight_pairs(ValueWeight *pairs, int n) {
             if (key & 0x8000000000000000ULL) {
                 key = ~key;
             } else {
-                key |= 0x8000000000000000ULL;
+                key ^= 0x8000000000000000ULL;
             }
             bucket = (key >> shift) & 0xFF;
             temp[--count[bucket]] = pairs[i];
@@ -122,6 +124,14 @@ static void counting_sort_value_weight_pairs(ValueWeight *pairs, int n) {
     /* Count occurrences */
     for (i = 0; i < n; i++) {
         bucket = (int)(pairs[i].value - min_val);
+        /* Guard against potential overflow */
+        if (bucket < 0 || bucket >= range_int) {
+            /* Fall back to radix sort for safety */
+            pfree(count);
+            pfree(temp);
+            radix_sort_value_weight_pairs(pairs, n);
+            return;
+        }
         count[bucket]++;
     }
     
@@ -216,4 +226,110 @@ extract_double_arrays(ArrayType *vals_array, ArrayType *weights_array,
     }
     
     return 0;
+}
+
+/* 
+ * Shared weighted variance calculation function
+ * Returns NaN for invalid parameters, otherwise returns variance
+ */
+double
+calculate_weighted_variance(double *vals, double *weights, int n_elements, int ddof) {
+    double sum_weighted = 0.0;
+    double sum_weights = 0.0;
+    double mean = 0.0;
+    double variance = 0.0;
+    int i;
+    double original_sum_weights;
+    double sum_weighted_sq_dev;
+    double sum_weights_sq;
+    double n_eff;
+    
+    /* Validate inputs */
+    if (!vals || !weights || n_elements < 0 || ddof < 0) {
+        return NAN;
+    }
+    
+    /* Handle empty arrays */
+    if (n_elements == 0) {
+        return 0.0;
+    }
+    
+    /* Check for negative weights and calculate total weight */
+    for (i = 0; i < n_elements; i++) {
+        if (weights[i] < 0.0) {
+            return NAN;
+        }
+        if (weights[i] > 0.0) {
+            sum_weights += weights[i];
+        }
+    }
+    
+    /* Handle sparse data: if sum_weights < 1.0, we'll add implicit zero */
+    original_sum_weights = sum_weights;
+    if (sum_weights < 1.0) {
+        sum_weights = 1.0;
+    }
+    
+    if (sum_weights == 0.0) {
+        return 0.0;
+    }
+    
+    /* Calculate weighted mean first */
+    for (i = 0; i < n_elements; i++) {
+        if (weights[i] > 0.0) {
+            sum_weighted += vals[i] * weights[i];
+        }
+    }
+    mean = sum_weighted / sum_weights;
+    
+    /* Calculate weighted variance */
+    sum_weighted_sq_dev = 0.0;
+    
+    /* Sum of weighted squared deviations for explicit values */
+    for (i = 0; i < n_elements; i++) {
+        if (weights[i] > 0.0) {
+            double deviation = vals[i] - mean;
+            sum_weighted_sq_dev += weights[i] * deviation * deviation;
+        }
+    }
+    
+    /* Add contribution from implicit zero if needed */
+    if (original_sum_weights < 1.0) {
+        double zero_weight = 1.0 - original_sum_weights;
+        double deviation = 0.0 - mean;
+        sum_weighted_sq_dev += zero_weight * deviation * deviation;
+    }
+    
+    /* Calculate variance based on ddof */
+    if (ddof == 0) {
+        /* Population variance */
+        variance = sum_weighted_sq_dev / sum_weights;
+    } else {
+        /* Sample variance with Bessel's correction */
+        /* Calculate effective sample size */
+        sum_weights_sq = 0.0;
+        
+        for (i = 0; i < n_elements; i++) {
+            if (weights[i] > 0.0) {
+                sum_weights_sq += weights[i] * weights[i];
+            }
+        }
+        
+        /* Add contribution from implicit zero if needed */
+        if (original_sum_weights < 1.0) {
+            double zero_weight = 1.0 - original_sum_weights;
+            sum_weights_sq += zero_weight * zero_weight;
+        }
+        
+        n_eff = sum_weights * sum_weights / sum_weights_sq;
+        
+        if (n_eff <= ddof) {
+            return NAN;
+        }
+        
+        /* Unbiased weighted variance */
+        variance = sum_weighted_sq_dev / sum_weights * n_eff / (n_eff - ddof);
+    }
+    
+    return variance;
 }

@@ -23,4 +23,6 @@ int extract_double_arrays(ArrayType *vals_array, ArrayType *weights_array,
 
 void optimized_sort_value_weight_pairs(ValueWeight *pairs, int n);
 
+double calculate_weighted_variance(double *vals, double *weights, int n_elements, int ddof);
+
 #endif /* WEIGHTED_STATS_UTILS_H */

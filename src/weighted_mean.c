@@ -38,7 +38,7 @@ weighted_mean_sparse_c(PG_FUNCTION_ARGS)
     
     /* Handle NULL inputs */
     if (PG_ARGISNULL(0) || PG_ARGISNULL(1)) {
-        PG_RETURN_FLOAT8(0.0);
+        PG_RETURN_NULL();
     }
     
     /* Get input arrays */
@@ -47,14 +47,14 @@ weighted_mean_sparse_c(PG_FUNCTION_ARGS)
     
     /* Extract arrays */
     if (extract_double_arrays(vals_array, weights_array, &vals, &weights, &n_elements) < 0) {
-        PG_RETURN_FLOAT8(0.0);
+        PG_RETURN_NULL();
     }
     
     /* Handle empty arrays */
     if (n_elements == 0) {
         pfree(vals);
         pfree(weights);
-        PG_RETURN_FLOAT8(0.0);
+        PG_RETURN_NULL();
     }
     
     /* Calculate weighted sum and total weight */
@@ -65,6 +65,13 @@ weighted_mean_sparse_c(PG_FUNCTION_ARGS)
             ereport(ERROR,
                     (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
                      errmsg("weights must be non-negative")));
+        }
+        if (isnan(vals[i]) || isinf(vals[i]) || isnan(weights[i]) || isinf(weights[i])) {
+            pfree(vals);
+            pfree(weights);
+            ereport(ERROR,
+                    (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                     errmsg("input arrays must not contain NaN or infinite values")));
         }
         if (weights[i] > 0.0) {
             sum_weighted += vals[i] * weights[i];
@@ -85,7 +92,7 @@ weighted_mean_sparse_c(PG_FUNCTION_ARGS)
     
     /* Return weighted mean */
     if (sum_weights == 0.0) {
-        PG_RETURN_FLOAT8(0.0);
+        PG_RETURN_NULL();
     }
     
     PG_RETURN_FLOAT8(sum_weighted / sum_weights);

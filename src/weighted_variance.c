@@ -31,19 +31,11 @@ weighted_variance_sparse_c(PG_FUNCTION_ARGS)
     double *vals, *weights;
     int n_elements;
     int ddof = 0;
-    double sum_weighted = 0.0;
-    double sum_weights = 0.0;
-    double mean = 0.0;
-    double variance = 0.0;
-    int i;
-    double original_sum_weights;
-    double sum_weighted_sq_dev;
-    double sum_weights_sq;
-    double n_eff;
+    double variance;
     
     /* Handle NULL inputs */
     if (PG_ARGISNULL(0) || PG_ARGISNULL(1)) {
-        PG_RETURN_FLOAT8(0.0);
+        PG_RETURN_NULL();
     }
     
     /* Get input arrays */
@@ -62,18 +54,11 @@ weighted_variance_sparse_c(PG_FUNCTION_ARGS)
     
     /* Extract arrays */
     if (extract_double_arrays(vals_array, weights_array, &vals, &weights, &n_elements) < 0) {
-        PG_RETURN_FLOAT8(0.0);
+        PG_RETURN_NULL();
     }
     
-    /* Handle empty arrays */
-    if (n_elements == 0) {
-        pfree(vals);
-        pfree(weights);
-        PG_RETURN_FLOAT8(0.0);
-    }
-    
-    /* Check for negative weights and calculate total weight */
-    for (i = 0; i < n_elements; i++) {
+    /* Check for negative weights and invalid values */
+    for (int i = 0; i < n_elements; i++) {
         if (weights[i] < 0.0) {
             pfree(vals);
             pfree(weights);
@@ -81,86 +66,26 @@ weighted_variance_sparse_c(PG_FUNCTION_ARGS)
                     (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
                      errmsg("weights must be non-negative")));
         }
-        if (weights[i] > 0.0) {
-            sum_weights += weights[i];
-        }
-    }
-    
-    /* Handle sparse data: if sum_weights < 1.0, we'll add implicit zero */
-    original_sum_weights = sum_weights;
-    if (sum_weights < 1.0) {
-        /* We'll handle the implicit zero separately */
-        sum_weights = 1.0;
-    }
-    
-    if (sum_weights == 0.0) {
-        pfree(vals);
-        pfree(weights);
-        PG_RETURN_FLOAT8(0.0);
-    }
-    
-    /* Calculate weighted mean first */
-    for (i = 0; i < n_elements; i++) {
-        if (weights[i] > 0.0) {
-            sum_weighted += vals[i] * weights[i];
-        }
-    }
-    mean = sum_weighted / sum_weights;
-    
-    /* Calculate weighted variance */
-    sum_weighted_sq_dev = 0.0;
-    
-    /* Sum of weighted squared deviations for explicit values */
-    for (i = 0; i < n_elements; i++) {
-        if (weights[i] > 0.0) {
-            double deviation = vals[i] - mean;
-            sum_weighted_sq_dev += weights[i] * deviation * deviation;
-        }
-    }
-    
-    /* Add contribution from implicit zero if needed */
-    if (original_sum_weights < 1.0) {
-        double zero_weight = 1.0 - original_sum_weights;
-        double deviation = 0.0 - mean;
-        sum_weighted_sq_dev += zero_weight * deviation * deviation;
-    }
-    
-    /* Calculate variance based on ddof */
-    if (ddof == 0) {
-        /* Population variance */
-        variance = sum_weighted_sq_dev / sum_weights;
-    } else {
-        /* Sample variance with Bessel's correction */
-        /* Calculate effective sample size */
-        sum_weights_sq = 0.0;
-        
-        for (i = 0; i < n_elements; i++) {
-            if (weights[i] > 0.0) {
-                sum_weights_sq += weights[i] * weights[i];
-            }
-        }
-        
-        /* Add contribution from implicit zero if needed */
-        if (original_sum_weights < 1.0) {
-            double zero_weight = 1.0 - original_sum_weights;
-            sum_weights_sq += zero_weight * zero_weight;
-        }
-        
-        n_eff = sum_weights * sum_weights / sum_weights_sq;
-        
-        if (n_eff <= ddof) {
+        if (isnan(vals[i]) || isinf(vals[i]) || isnan(weights[i]) || isinf(weights[i])) {
             pfree(vals);
             pfree(weights);
-            PG_RETURN_NULL();  /* Return NULL instead of NaN */
+            ereport(ERROR,
+                    (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                     errmsg("input arrays must not contain NaN or infinite values")));
         }
-        
-        /* Unbiased weighted variance */
-        variance = sum_weighted_sq_dev / sum_weights * n_eff / (n_eff - ddof);
     }
+    
+    /* Calculate variance using shared function */
+    variance = calculate_weighted_variance(vals, weights, n_elements, ddof);
     
     /* Clean up */
     pfree(vals);
     pfree(weights);
+    
+    /* Handle NaN result */
+    if (isnan(variance)) {
+        PG_RETURN_NULL();
+    }
     
     PG_RETURN_FLOAT8(variance);
 }
@@ -181,19 +106,11 @@ weighted_std_sparse_c(PG_FUNCTION_ARGS)
     double *vals, *weights;
     int n_elements;
     int ddof = 0;
-    double sum_weighted = 0.0;
-    double sum_weights = 0.0;
-    double mean = 0.0;
-    double variance = 0.0;
-    int i;
-    double original_sum_weights;
-    double sum_weighted_sq_dev;
-    double sum_weights_sq;
-    double n_eff;
+    double variance;
     
     /* Handle NULL inputs */
     if (PG_ARGISNULL(0) || PG_ARGISNULL(1)) {
-        PG_RETURN_FLOAT8(0.0);
+        PG_RETURN_NULL();
     }
     
     /* Get input arrays */
@@ -212,18 +129,11 @@ weighted_std_sparse_c(PG_FUNCTION_ARGS)
     
     /* Extract arrays */
     if (extract_double_arrays(vals_array, weights_array, &vals, &weights, &n_elements) < 0) {
-        PG_RETURN_FLOAT8(0.0);
+        PG_RETURN_NULL();
     }
     
-    /* Handle empty arrays */
-    if (n_elements == 0) {
-        pfree(vals);
-        pfree(weights);
-        PG_RETURN_FLOAT8(0.0);
-    }
-    
-    /* Check for negative weights and calculate total weight */
-    for (i = 0; i < n_elements; i++) {
+    /* Check for negative weights and invalid values */
+    for (int i = 0; i < n_elements; i++) {
         if (weights[i] < 0.0) {
             pfree(vals);
             pfree(weights);
@@ -231,86 +141,26 @@ weighted_std_sparse_c(PG_FUNCTION_ARGS)
                     (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
                      errmsg("weights must be non-negative")));
         }
-        if (weights[i] > 0.0) {
-            sum_weights += weights[i];
-        }
-    }
-    
-    /* Handle sparse data: if sum_weights < 1.0, we'll add implicit zero */
-    original_sum_weights = sum_weights;
-    if (sum_weights < 1.0) {
-        /* We'll handle the implicit zero separately */
-        sum_weights = 1.0;
-    }
-    
-    if (sum_weights == 0.0) {
-        pfree(vals);
-        pfree(weights);
-        PG_RETURN_FLOAT8(0.0);
-    }
-    
-    /* Calculate weighted mean first */
-    for (i = 0; i < n_elements; i++) {
-        if (weights[i] > 0.0) {
-            sum_weighted += vals[i] * weights[i];
-        }
-    }
-    mean = sum_weighted / sum_weights;
-    
-    /* Calculate weighted variance */
-    sum_weighted_sq_dev = 0.0;
-    
-    /* Sum of weighted squared deviations for explicit values */
-    for (i = 0; i < n_elements; i++) {
-        if (weights[i] > 0.0) {
-            double deviation = vals[i] - mean;
-            sum_weighted_sq_dev += weights[i] * deviation * deviation;
-        }
-    }
-    
-    /* Add contribution from implicit zero if needed */
-    if (original_sum_weights < 1.0) {
-        double zero_weight = 1.0 - original_sum_weights;
-        double deviation = 0.0 - mean;
-        sum_weighted_sq_dev += zero_weight * deviation * deviation;
-    }
-    
-    /* Calculate variance based on ddof */
-    if (ddof == 0) {
-        /* Population variance */
-        variance = sum_weighted_sq_dev / sum_weights;
-    } else {
-        /* Sample variance with Bessel's correction */
-        /* Calculate effective sample size */
-        sum_weights_sq = 0.0;
-        
-        for (i = 0; i < n_elements; i++) {
-            if (weights[i] > 0.0) {
-                sum_weights_sq += weights[i] * weights[i];
-            }
-        }
-        
-        /* Add contribution from implicit zero if needed */
-        if (original_sum_weights < 1.0) {
-            double zero_weight = 1.0 - original_sum_weights;
-            sum_weights_sq += zero_weight * zero_weight;
-        }
-        
-        n_eff = sum_weights * sum_weights / sum_weights_sq;
-        
-        if (n_eff <= ddof) {
+        if (isnan(vals[i]) || isinf(vals[i]) || isnan(weights[i]) || isinf(weights[i])) {
             pfree(vals);
             pfree(weights);
-            PG_RETURN_NULL();  /* Return NULL instead of NaN */
+            ereport(ERROR,
+                    (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                     errmsg("input arrays must not contain NaN or infinite values")));
         }
-        
-        /* Unbiased weighted variance */
-        variance = sum_weighted_sq_dev / sum_weights * n_eff / (n_eff - ddof);
     }
+    
+    /* Calculate variance using shared function */
+    variance = calculate_weighted_variance(vals, weights, n_elements, ddof);
     
     /* Clean up */
     pfree(vals);
     pfree(weights);
+    
+    /* Handle NaN result */
+    if (isnan(variance)) {
+        PG_RETURN_NULL();
+    }
     
     /* Return standard deviation (square root of variance) */
     PG_RETURN_FLOAT8(sqrt(variance));
