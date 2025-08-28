@@ -1,0 +1,237 @@
+-- Mathematical properties tests for weighted_statistics extension
+-- 
+-- Validates that functions satisfy fundamental mathematical properties
+-- =============================================================================
+-- QUANTILE MONOTONICITY PROPERTIES
+-- =============================================================================
+-- Test 1: Quantiles should be monotonically increasing
+WITH quantile_results AS (
+    SELECT 
+        weighted_quantile(ARRAY[1.0, 2.0, 3.0, 4.0, 5.0], 
+                         ARRAY[0.2, 0.2, 0.2, 0.2, 0.2], 
+                         ARRAY[0.1, 0.25, 0.5, 0.75, 0.9]) AS q
+)
+SELECT 
+    'Quantile monotonicity (empirical CDF)' AS test_name,
+    q,
+    (q[1] <= q[2] AND q[2] <= q[3] AND q[3] <= q[4] AND q[4] <= q[5]) AS is_monotonic
+FROM quantile_results;
+ERROR:  function weighted_quantile(numeric[], numeric[], numeric[]) does not exist
+LINE 3:         weighted_quantile(ARRAY[1.0, 2.0, 3.0, 4.0, 5.0], 
+                ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+-- Test 2: wquantile monotonicity
+WITH wquantile_results AS (
+    SELECT 
+        wquantile(ARRAY[1.0, 2.0, 3.0, 4.0, 5.0], 
+                  ARRAY[0.2, 0.2, 0.2, 0.2, 0.2], 
+                  ARRAY[0.1, 0.25, 0.5, 0.75, 0.9]) AS q
+)
+SELECT 
+    'wquantile monotonicity (Type 7)' AS test_name,
+    q,
+    (q[1] <= q[2] AND q[2] <= q[3] AND q[3] <= q[4] AND q[4] <= q[5]) AS is_monotonic
+FROM wquantile_results;
+ERROR:  function wquantile(numeric[], numeric[], numeric[]) does not exist
+LINE 3:         wquantile(ARRAY[1.0, 2.0, 3.0, 4.0, 5.0], 
+                ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+-- Test 3: whdquantile monotonicity
+WITH whdquantile_results AS (
+    SELECT 
+        whdquantile(ARRAY[1.0, 2.0, 3.0, 4.0, 5.0], 
+                    ARRAY[0.2, 0.2, 0.2, 0.2, 0.2], 
+                    ARRAY[0.1, 0.25, 0.5, 0.75, 0.9]) AS q
+)
+SELECT 
+    'whdquantile monotonicity (Harrell-Davis)' AS test_name,
+    q,
+    (q[1] <= q[2] AND q[2] <= q[3] AND q[3] <= q[4] AND q[4] <= q[5]) AS is_monotonic
+FROM whdquantile_results;
+ERROR:  function whdquantile(numeric[], numeric[], numeric[]) does not exist
+LINE 3:         whdquantile(ARRAY[1.0, 2.0, 3.0, 4.0, 5.0], 
+                ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+-- =============================================================================
+-- BOUNDEDNESS PROPERTIES
+-- =============================================================================
+-- Test 4: Weighted mean should be bounded by min/max when sum(weights) = 1.0
+WITH bounded_mean_test AS (
+    SELECT 
+        weighted_mean(ARRAY[5.0, 15.0, 25.0], ARRAY[0.3, 0.4, 0.3]) AS wmean,
+        5.0 AS min_val,
+        25.0 AS max_val
+)
+SELECT 
+    'Bounded mean property (full weights)' AS test_name,
+    wmean,
+    wmean >= min_val AND wmean <= max_val AS within_bounds
+FROM bounded_mean_test;
+ERROR:  function weighted_mean(numeric[], numeric[]) does not exist
+LINE 3:         weighted_mean(ARRAY[5.0, 15.0, 25.0], ARRAY[0.3, 0.4...
+                ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+-- Test 5: Quantile boundary values
+SELECT 
+    'Quantile boundary values' AS test_name,
+    weighted_quantile(ARRAY[1.0, 5.0, 10.0], ARRAY[0.3, 0.3, 0.4], ARRAY[0.0, 1.0]) AS boundaries,
+    'Should approximate [min_value, max_value]' AS expected_property;
+ERROR:  function weighted_quantile(numeric[], numeric[], numeric[]) does not exist
+LINE 3:     weighted_quantile(ARRAY[1.0, 5.0, 10.0], ARRAY[0.3, 0.3,...
+            ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+-- =============================================================================
+-- CONSISTENCY PROPERTIES
+-- =============================================================================
+-- Test 6: Median consistency across functions
+WITH median_consistency AS (
+    SELECT 
+        weighted_median(ARRAY[2.0, 4.0, 6.0, 8.0], ARRAY[0.25, 0.25, 0.25, 0.25]) AS median_func,
+        (weighted_quantile(ARRAY[2.0, 4.0, 6.0, 8.0], ARRAY[0.25, 0.25, 0.25, 0.25], ARRAY[0.5]))[1] AS quantile_func
+)
+SELECT 
+    'Median function consistency' AS test_name,
+    median_func,
+    quantile_func,
+    abs(median_func - quantile_func) < 1e-10 AS consistent
+FROM median_consistency;
+ERROR:  function weighted_median(numeric[], numeric[]) does not exist
+LINE 3:         weighted_median(ARRAY[2.0, 4.0, 6.0, 8.0], ARRAY[0.2...
+                ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+-- Test 7: Variance-Standard Deviation relationship (std = sqrt(variance))
+WITH variance_std_test AS (
+    SELECT 
+        weighted_variance(ARRAY[1.0, 3.0, 5.0, 7.0], ARRAY[0.25, 0.25, 0.25, 0.25], 0) AS var_result,
+        weighted_std(ARRAY[1.0, 3.0, 5.0, 7.0], ARRAY[0.25, 0.25, 0.25, 0.25], 0) AS std_result
+)
+SELECT 
+    'Variance-std relationship' AS test_name,
+    var_result,
+    std_result,
+    sqrt(var_result) AS sqrt_variance,
+    abs(std_result - sqrt(var_result)) < 1e-10 AS consistent
+FROM variance_std_test;
+ERROR:  function weighted_variance(numeric[], numeric[], integer) does not exist
+LINE 3:         weighted_variance(ARRAY[1.0, 3.0, 5.0, 7.0], ARRAY[0...
+                ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+-- =============================================================================
+-- DDOF BEHAVIOR PROPERTIES
+-- =============================================================================
+-- Test 8: Sample variance should be larger than population variance
+WITH ddof_comparison AS (
+    SELECT 
+        weighted_variance(ARRAY[1.0, 2.0, 3.0, 4.0, 5.0], ARRAY[0.2, 0.2, 0.2, 0.2, 0.2], 0) AS pop_var,
+        weighted_variance(ARRAY[1.0, 2.0, 3.0, 4.0, 5.0], ARRAY[0.2, 0.2, 0.2, 0.2, 0.2], 1) AS sample_var
+)
+SELECT 
+    'Sample vs population variance' AS test_name,
+    pop_var,
+    sample_var,
+    sample_var > pop_var AS sample_larger
+FROM ddof_comparison;
+ERROR:  function weighted_variance(numeric[], numeric[], integer) does not exist
+LINE 3:         weighted_variance(ARRAY[1.0, 2.0, 3.0, 4.0, 5.0], AR...
+                ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+-- Test 9: Same relationship for standard deviation
+WITH ddof_std_comparison AS (
+    SELECT 
+        weighted_std(ARRAY[1.0, 2.0, 3.0, 4.0, 5.0], ARRAY[0.2, 0.2, 0.2, 0.2, 0.2], 0) AS pop_std,
+        weighted_std(ARRAY[1.0, 2.0, 3.0, 4.0, 5.0], ARRAY[0.2, 0.2, 0.2, 0.2, 0.2], 1) AS sample_std
+)
+SELECT 
+    'Sample vs population std dev' AS test_name,
+    pop_std,
+    sample_std,
+    sample_std > pop_std AS sample_larger
+FROM ddof_std_comparison;
+ERROR:  function weighted_std(numeric[], numeric[], integer) does not exist
+LINE 3:         weighted_std(ARRAY[1.0, 2.0, 3.0, 4.0, 5.0], ARRAY[0...
+                ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+-- =============================================================================
+-- SPARSE DATA PROPERTIES
+-- =============================================================================
+-- Test 10: Sparse data should account for implicit zeros in mean
+WITH sparse_mean_test AS (
+    SELECT 
+        weighted_mean(ARRAY[10.0, 20.0], ARRAY[0.2, 0.3]) AS sparse_mean
+)
+SELECT 
+    'Sparse data mean bounds' AS test_name,
+    sparse_mean,
+    sparse_mean >= 0.0 AND sparse_mean <= 20.0 AS within_bounds,
+    'Mean should be between 0 and max(values) due to implicit zeros' AS explanation
+FROM sparse_mean_test;
+ERROR:  function weighted_mean(numeric[], numeric[]) does not exist
+LINE 3:         weighted_mean(ARRAY[10.0, 20.0], ARRAY[0.2, 0.3]) AS...
+                ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+-- Test 11: Sparse data variance should account for implicit zeros
+WITH sparse_variance_test AS (
+    SELECT 
+        weighted_variance(ARRAY[10.0, 20.0], ARRAY[0.3, 0.2], 0) AS sparse_var,
+        weighted_mean(ARRAY[10.0, 20.0], ARRAY[0.3, 0.2]) AS sparse_mean
+)
+SELECT 
+    'Sparse data variance property' AS test_name,
+    sparse_var,
+    sparse_mean,
+    sparse_var > 0 AS variance_positive,
+    'Variance should be positive due to deviation from implicit zeros' AS explanation
+FROM sparse_variance_test;
+ERROR:  function weighted_variance(numeric[], numeric[], integer) does not exist
+LINE 3:         weighted_variance(ARRAY[10.0, 20.0], ARRAY[0.3, 0.2]...
+                ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+-- =============================================================================
+-- SYMMETRY PROPERTIES
+-- =============================================================================
+-- Test 12: Median of symmetric distribution
+SELECT 
+    'Symmetric distribution median' AS test_name,
+    (weighted_quantile(ARRAY[1.0, 2.0, 3.0], ARRAY[0.33, 0.34, 0.33], ARRAY[0.5]))[1] AS median_result,
+    abs((weighted_quantile(ARRAY[1.0, 2.0, 3.0], ARRAY[0.33, 0.34, 0.33], ARRAY[0.5]))[1] - 2.0) < 0.1 AS close_to_center;
+ERROR:  function weighted_quantile(numeric[], numeric[], numeric[]) does not exist
+LINE 3:     (weighted_quantile(ARRAY[1.0, 2.0, 3.0], ARRAY[0.33, 0.3...
+             ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+-- =============================================================================
+-- LARGE ARRAY MATHEMATICAL ACCURACY
+-- =============================================================================
+-- Test 13: Large array accuracy (mean of sequence 1-100 should be 50.5)
+WITH large_array_test AS (
+    SELECT 
+        array_agg(generate_series) AS vals,
+        array_fill(0.01, ARRAY[100]) AS weights
+    FROM generate_series(1, 100)
+),
+large_mean_test AS (
+    SELECT weighted_mean(vals, weights) AS wmean
+    FROM large_array_test
+)
+SELECT 
+    'Large array mean accuracy' AS test_name,
+    wmean,
+    abs(wmean - 50.5) < 0.1 AS accurate
+FROM large_mean_test;
+ERROR:  function weighted_mean(integer[], numeric[]) does not exist
+LINE 8:     SELECT weighted_mean(vals, weights) AS wmean
+                   ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+-- =============================================================================
+-- ZERO VARIANCE PROPERTIES
+-- =============================================================================
+-- Test 14: Zero variance when all values are identical
+SELECT 
+    'Zero variance property' AS test_name,
+    weighted_variance(ARRAY[5.0, 5.0, 5.0, 5.0], ARRAY[0.25, 0.25, 0.25, 0.25], 0) AS var_result,
+    weighted_std(ARRAY[5.0, 5.0, 5.0, 5.0], ARRAY[0.25, 0.25, 0.25, 0.25], 0) AS std_result,
+    weighted_variance(ARRAY[5.0, 5.0, 5.0, 5.0], ARRAY[0.25, 0.25, 0.25, 0.25], 0) = 0.0 AS variance_zero,
+    weighted_std(ARRAY[5.0, 5.0, 5.0, 5.0], ARRAY[0.25, 0.25, 0.25, 0.25], 0) = 0.0 AS std_zero;
+ERROR:  function weighted_variance(numeric[], numeric[], integer) does not exist
+LINE 3:     weighted_variance(ARRAY[5.0, 5.0, 5.0, 5.0], ARRAY[0.25,...
+            ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.

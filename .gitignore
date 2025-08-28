@@ -14,10 +14,13 @@ src/*.o
 src/*.so
 
 # PostgreSQL regression test artifacts
-test/regression.diffs
-test/regression.out
+regression.diffs
+regression.out
+results/
 test/results/
-test/tmp_check/
+tmp_check/
+log/
+output_iso/
 
 # Backup files
 *.bak

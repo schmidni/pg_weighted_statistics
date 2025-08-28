@@ -14,8 +14,7 @@ PG_CPPFLAGS = -O2 -funroll-loops
 PG_LDFLAGS = -lm 
 
 # Regression tests
-REGRESS = basic_tests accuracy_tests performance_tests
-REGRESS_OPTS = --inputdir=test/sql --outputdir=test/results
+REGRESS = functionality_tests mathematical_properties_tests edge_cases_tests
 
 # Test data directories
 TESTDIR = test

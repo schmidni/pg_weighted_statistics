@@ -6,13 +6,28 @@
 set -e
 
 EXTENSION_NAME="weighted_statistics"
-TEST_DB="${TEST_DATABASE:-postgres}"
-TEST_USER="${TEST_USER:-postgres}"
-TEST_HOST="${TEST_HOST:-localhost}"
-TEST_PORT="${TEST_PORT:-5432}"
 
-# PostgreSQL connection options
-PSQL_OPTS="-h $TEST_HOST -p $TEST_PORT -d $TEST_DB -U $TEST_USER"
+# Use system defaults first, with fallbacks and environment override capability
+TEST_DB="${TEST_DATABASE:-${PGDATABASE:-nico}}"
+TEST_USER="${TEST_USER:-${PGUSER:-nico}}"
+TEST_HOST="${TEST_HOST:-${PGHOST:-localhost}}"
+TEST_PORT="${TEST_PORT:-${PGPORT:-5454}}"
+
+# Build connection options - only specify what's needed
+PSQL_OPTS=""
+
+# Add database if specified
+[[ -n "$TEST_DB" && "$TEST_DB" != "" ]] && PSQL_OPTS="$PSQL_OPTS -d $TEST_DB"
+
+# Add user if different from system user
+[[ -n "$TEST_USER" && "$TEST_USER" != "$(whoami)" ]] && PSQL_OPTS="$PSQL_OPTS -U $TEST_USER"
+
+# Only add host/port if they're specified and different from defaults
+# This allows socket connection when possible
+if [[ -n "$TEST_HOST" && "$TEST_HOST" != "" ]] || [[ -n "$TEST_PORT" && "$TEST_PORT" != "5432" ]]; then
+    [[ -n "$TEST_HOST" ]] && PSQL_OPTS="$PSQL_OPTS -h $TEST_HOST"
+    [[ -n "$TEST_PORT" ]] && PSQL_OPTS="$PSQL_OPTS -p $TEST_PORT"
+fi
 
 echo "Weighted Statistics Extension Test Suite"
 echo "======================================="
@@ -34,11 +49,11 @@ echo ""
 echo "Running test suite..."
 echo "--------------------"
 
-for test in basic_tests accuracy_tests performance_tests; do
+for test in functionality_tests mathematical_properties_tests edge_cases_tests; do
     echo "Running $test..."
     
     # Run the test and capture output
-    if psql $PSQL_OPTS -f "test/sql/$test.sql" > "test/results/$test.out" 2>&1; then
+    if psql $PSQL_OPTS -f "sql/$test.sql" > "test/results/$test.out" 2>&1; then
         echo "✓ $test completed"
     else
         echo "✗ $test failed"
@@ -57,7 +72,7 @@ echo "----------------------------------------"
 total_tests=0
 passed_tests=0
 
-for test in basic_tests accuracy_tests performance_tests; do
+for test in functionality_tests mathematical_properties_tests edge_cases_tests; do
     total_tests=$((total_tests + 1))
     
     if [ "$test" = "performance_tests" ]; then
@@ -68,14 +83,14 @@ for test in basic_tests accuracy_tests performance_tests; do
             echo "✓ $test ran without errors (performance results vary)"
             passed_tests=$((passed_tests + 1))
         fi
-    elif [ -f "test/expected/$test.out" ]; then
+    elif [ -f "expected/$test.out" ]; then
         # For floating-point tests, check if the differences are only minor precision differences
-        if diff -q "test/expected/$test.out" "test/results/$test.out" > /dev/null 2>&1; then
+        if diff -q "expected/$test.out" "test/results/$test.out" > /dev/null 2>&1; then
             echo "✓ $test matches expected output"
             passed_tests=$((passed_tests + 1))
         else
             # Check if differences are only floating-point precision issues
-            diff_output=$(diff "test/expected/$test.out" "test/results/$test.out" 2>/dev/null || true)
+            diff_output=$(diff "expected/$test.out" "test/results/$test.out" 2>/dev/null || true)
             
             # Count lines that are NOT just floating-point precision differences
             significant_diffs=$(echo "$diff_output" | grep -v "^[0-9,]*[acd][0-9,]*$" | \
@@ -89,7 +104,7 @@ for test in basic_tests accuracy_tests performance_tests; do
                 passed_tests=$((passed_tests + 1))
             else
                 echo "✗ $test differs from expected output"
-                echo "  Run: diff test/expected/$test.out test/results/$test.out"
+                echo "  Run: diff expected/$test.out test/results/$test.out"
             fi
         fi
     else

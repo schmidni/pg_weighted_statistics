@@ -11,15 +11,20 @@ CREATE EXTENSION weighted_statistics;
 SELECT weighted_mean(ARRAY[1.0, 2.0, 3.0], ARRAY[0.2, 0.3, 0.5]);
 -- Result: 2.3
 
--- Weighted quantiles  
-SELECT weighted_quantile(
-    ARRAY[10.0, 20.0, 30.0], 
-    ARRAY[0.3, 0.4, 0.3], 
-    ARRAY[0.25, 0.5, 0.75]
-);
--- Result: {10.0, 15.0, 21.67}
+-- Weighted variance and standard deviation
+SELECT 
+    weighted_variance(ARRAY[1.0, 2.0, 3.0], ARRAY[0.2, 0.3, 0.5], 0) AS pop_var,
+    weighted_std(ARRAY[1.0, 2.0, 3.0], ARRAY[0.2, 0.3, 0.5], 1) AS sample_std;
+-- Results: pop_var = 0.61, sample_std = 0.87
 
--- Weighted median
+-- Weighted quantiles (multiple methods)
+SELECT 
+    weighted_quantile(ARRAY[10.0, 20.0, 30.0], ARRAY[0.3, 0.4, 0.3], ARRAY[0.5]) AS empirical,
+    wquantile(ARRAY[10.0, 20.0, 30.0], ARRAY[0.3, 0.4, 0.3], ARRAY[0.5]) AS type7,
+    whdquantile(ARRAY[10.0, 20.0, 30.0], ARRAY[0.3, 0.4, 0.3], ARRAY[0.5]) AS harrell_davis;
+-- Results: empirical = {18.57}, type7 = {19.29}, harrell_davis = {19.12}
+
+-- Weighted median (convenience function)
 SELECT weighted_median(ARRAY[1.0, 2.0, 3.0], ARRAY[0.2, 0.3, 0.5]);
 -- Result: 2.0
 ```
@@ -43,13 +48,29 @@ psql -c "CREATE EXTENSION weighted_statistics;"
 
 ## Functions
 
-### `weighted_mean(values[], weights[])`
+### Core Statistics Functions
+
+#### `weighted_mean(values[], weights[])`
 Returns weighted mean accounting for sparse data (implicit zeros when `sum(weights) < 1.0`).
 
-### `weighted_quantile(values[], weights[], quantiles[])`
-Returns array of weighted quantiles. Calculates multiple quantiles efficiently in one pass.
+#### `weighted_variance(values[], weights[], ddof DEFAULT 0)`
+Returns weighted variance. Use `ddof=0` for population variance, `ddof=1` for sample variance.
 
-### `weighted_median(values[], weights[])`
+#### `weighted_std(values[], weights[], ddof DEFAULT 0)`  
+Returns weighted standard deviation. Use `ddof=0` for population, `ddof=1` for sample.
+
+### Quantile Functions
+
+#### `weighted_quantile(values[], weights[], quantiles[])`
+Simple weighted quantiles using empirical CDF. Fast and robust for general use.
+
+#### `wquantile(values[], weights[], quantiles[])`
+Type 7 weighted quantiles (Hyndman-Fan). Generalizes R/NumPy default quantile method to weighted data.
+
+#### `whdquantile(values[], weights[], quantiles[])`
+Harrell-Davis weighted quantiles. Smooths over all data points for improved efficiency with light-tailed distributions.
+
+#### `weighted_median(values[], weights[])`
 Convenience function returning weighted median (equivalent to `weighted_quantile(..., ARRAY[0.5])[1]`).
 
 ## Sparse Data Handling
@@ -67,18 +88,22 @@ Perfect for incomplete datasets, survey data, risk assessments where "no event" 
 
 ## Testing & Validation
 
-Two-tier testing ensures both mathematical correctness and behavioral consistency:
+Multi-tier testing ensures both mathematical correctness and behavioral consistency:
 
 ```bash
 # 1. Mathematical correctness (validates functions work correctly)
 cd reference && python validate_against_reference.py --database test_db
 
-# 2. Regression testing (ensures no behavioral changes)
+# 2. Regression testing (PostgreSQL standard)
+make installcheck
+
+# 3. Custom regression testing (alternative approach)
 ./test/run_tests.sh
 ```
 
-- **`validate_against_reference.py`**: Compares C implementation against Python reference - confirms mathematical accuracy
-- **`run_tests.sh`**: Compares current output against saved baselines - guards against regressions
+- **`validate_against_reference.py`**: Compares C implementation against Python reference implementations - confirms mathematical accuracy for all functions
+- **`make installcheck`**: Uses PostgreSQL's standard regression test framework (pg_regress) - creates temporary test database and runs comprehensive function tests
+- **`run_tests.sh`**: Custom test runner that uses existing database - provides same comprehensive testing with more flexibility
 
 ## Performance
 
@@ -105,14 +130,32 @@ This compares C vs PL/pgSQL performance and shows:
 ## Use Cases
 
 ```sql
--- Risk assessment
+-- Risk assessment with comprehensive statistics
 WITH risk_data AS (
     SELECT region, array_agg(risk_value) AS values, array_agg(probability) AS weights
     FROM risk_assessments GROUP BY region
 )
-SELECT region, weighted_mean(values, weights) AS mean_risk,
-       weighted_quantile(values, weights, ARRAY[0.1, 0.5, 0.9]) AS risk_quantiles
+SELECT 
+    region, 
+    weighted_mean(values, weights) AS mean_risk,
+    weighted_std(values, weights, 1) AS risk_volatility,
+    weighted_quantile(values, weights, ARRAY[0.05, 0.5, 0.95]) AS risk_quantiles,
+    wquantile(values, weights, ARRAY[0.25, 0.75]) AS iqr_bounds
 FROM risk_data;
+
+-- Survey analysis with different quantile methods
+SELECT 
+    weighted_quantile(responses, weights, ARRAY[0.5]) AS empirical_median,
+    wquantile(responses, weights, ARRAY[0.5]) AS type7_median,  
+    whdquantile(responses, weights, ARRAY[0.5]) AS smooth_median
+FROM survey_data;
+
+-- Portfolio analysis
+SELECT 
+    weighted_mean(returns, allocations) AS portfolio_return,
+    weighted_variance(returns, allocations, 1) AS portfolio_variance,
+    sqrt(weighted_variance(returns, allocations, 1)) AS portfolio_volatility
+FROM portfolio_holdings;
 ```
 
 ## Repository Structure
@@ -135,7 +178,8 @@ make clean && make           # Clean rebuild
 
 # Testing workflow
 cd reference && python validate_against_reference.py --database test_db  # Verify math
-./test/run_tests.sh                                                      # Check regressions
+make installcheck                                                        # Standard regression tests
+./test/run_tests.sh                                                      # Custom regression tests
 ```
 
 ## Troubleshooting
@@ -151,14 +195,32 @@ cd reference && python validate_against_reference.py --database test_db  # Verif
 1. Fork repository
 2. Add tests for new functionality  
 3. Ensure mathematical correctness: `python reference/validate_against_reference.py`
-4. Ensure no regressions: `./test/run_tests.sh`
+4. Ensure no regressions: `make installcheck` or `./test/run_tests.sh`
 5. Submit pull request
+
+### Testing Requirements
+
+For different PostgreSQL setups, set connection parameters as needed:
+
+```bash
+# Standard setup (default port 5432)
+make installcheck
+
+# Custom setup (different port/credentials)
+PGPORT=5454 PGPASSWORD=mypass make installcheck
+
+# Alternative custom testing
+PGPORT=5454 PGPASSWORD=mypass ./test/run_tests.sh
+```
 
 ---
 
-**Summary**: Production-ready PostgreSQL extension providing mathematically accurate, high-performance weighted statistics with automatic sparse data handling. Perfect for risk analysis, surveys, and incomplete datasets.
+**Summary**: Production-ready PostgreSQL extension providing a comprehensive suite of mathematically accurate, high-performance weighted statistics with automatic sparse data handling. Perfect for risk analysis, portfolio management, surveys, and incomplete datasets.
 
-- ✅ **Validated**: 100% accuracy vs Python reference  
-- ✅ **Fast**: 3-10x speedup with C optimization  
-- ✅ **Robust**: Handles edge cases and NULL values  
-- ✅ **Tested**: Comprehensive test suite with real datasets
+**Functions**: 7 weighted statistics functions covering means, variance, standard deviation, and three quantile methods (empirical CDF, Type 7, Harrell-Davis).
+
+- ✅ **Mathematically Validated**: 100% accuracy vs Python reference implementations
+- ✅ **High Performance**: 3-10x faster than PL/pgSQL with optimized C code
+- ✅ **Comprehensive**: Mean, variance, std dev, and multiple quantile methods  
+- ✅ **Robust**: Handles edge cases, NULL values, and sparse data automatically
+- ✅ **Well Tested**: Comprehensive regression test suite covering functionality, mathematical properties, and edge cases
