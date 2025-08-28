@@ -1,10 +1,10 @@
 {
    "name": "weighted_statistics",
    "abstract": "High-performance weighted statistics functions for sparse data",
-   "description": "A PostgreSQL extension providing weighted mean and quantile functions optimized for sparse data where sum(weights) < 1.0 implies implicit zeros. Offers 3-10x performance improvement over PL/pgSQL implementations through C optimization.",
+   "description": "A PostgreSQL extension providing 7 weighted statistical functions (mean, variance, std deviation, and 3 quantile methods) optimized for sparse data where sum(weights) < 1.0 implies implicit zeros. Offers up to 14x performance improvement over PL/pgSQL implementations through optimized C code. Based on Akinshin (2023) weighted quantile methods.",
    "version": "1.0.0",
    "maintainer": [
-      "Extension Maintainer <maintainer@example.com>"
+      "Nicolas Schmid"
    ],
    "license": {
       "PostgreSQL": "http://www.postgresql.org/about/licence"
@@ -24,17 +24,17 @@
       }
    },
    "resources": {
-      "homepage": "https://github.com/username/weighted_statistics",
+      "homepage": "https://github.com/schmidni/pg_weighted_statistics",
       "bugtracker": {
-         "web": "https://github.com/username/weighted_statistics/issues"
+         "web": "https://github.com/schmidni/pg_weighted_statistics/issues"
       },
       "repository": {
-         "url": "git://github.com/username/weighted_statistics.git",
-         "web": "https://github.com/username/weighted_statistics",
+         "url": "git://github.com/schmidni/weighted_statistics.git",
+         "web": "https://github.com/schmidni/pg_weighted_statistics",
          "type": "git"
       }
    },
-   "generated_by": "Extension Author",
+   "generated_by": "Nicolas Schmid",
    "meta-spec": {
       "version": "1.0.0",
       "url": "https://pgxn.org/spec/"
@@ -47,8 +47,12 @@
       "performance",
       "c extension",
       "aggregates",
-      "math"
+      "math",
+      "risk analysis",
+      "akinshin",
+      "empirical cdf",
+      "harrell-davis"
    ],
    "release_status": "stable",
-   "X_comment": "This extension provides weighted statistical functions optimized for sparse datasets commonly found in risk assessment, survey analysis, and incomplete data scenarios."
+   "X_comment": "This extension provides 7 weighted statistical functions (mean, variance, std, weighted_quantile, wquantile, whdquantile, weighted_median) optimized for sparse datasets commonly found in risk assessment, survey analysis, and incomplete data scenarios. All functions automatically handle sparse data where sum(weights) < 1.0 by adding implicit zeros."
 }

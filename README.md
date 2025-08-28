@@ -18,7 +18,7 @@ psql -c "CREATE EXTENSION weighted_statistics;"
 - `weighted_quantile(values[], weights[], quantiles[])` - Empirical CDF quantiles
 - `wquantile(values[], weights[], quantiles[])` - Type 7 (Hyndman-Fan) quantiles
 - `whdquantile(values[], weights[], quantiles[])` - Harrell-Davis quantiles
-- `weighted_median(values[], weights[])` - 50th percentile shortcut
+- `weighted_median(values[], weights[])` - 50th percentile shortcut for empirical CDF
 
 ```sql
 -- Basic usage examples
