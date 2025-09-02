@@ -151,6 +151,13 @@ jobs:
               uses: docker/metadata-action@v5
               with:
                   images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+                  tags: |
+                      # Latest tag for main branch
+                      type=raw,value=latest,enable={{is_default_branch}}
+                      # Git short commit SHA
+                      type=sha,prefix={{branch}}-,format=short
+                      # PostGIS version matching base image
+                      type=raw,value=pg16-postgis3.5,enable={{is_default_branch}}
             - name: Build and push Docker image
               id: push
               uses: docker/build-push-action@v6
