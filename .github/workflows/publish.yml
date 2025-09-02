@@ -1,4 +1,4 @@
-name: CI/CD Pipeline
+name: Test, Build and Push
 
 on:
     push:
@@ -16,21 +16,6 @@ jobs:
         name: Python Reference Validation
         runs-on: ubuntu-latest
 
-        services:
-            postgres:
-                image: postgres:16
-                env:
-                    POSTGRES_USER: postgres
-                    POSTGRES_PASSWORD: postgres
-                    POSTGRES_DB: test_db
-                ports:
-                    - 5432:5432
-                options: >-
-                    --health-cmd pg_isready
-                    --health-interval 10s
-                    --health-timeout 5s
-                    --health-retries 5
-
         steps:
             - name: Checkout code
               uses: actions/checkout@v4
@@ -40,14 +25,15 @@ jobs:
               with:
                   python-version: '3.11'
 
-            - name: Install PostgreSQL development packages
+            - name: Install PostgreSQL and development packages
               run: |
+                  sudo apt install -y postgresql-common
+                  sudo /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh
                   sudo apt-get update
                   sudo apt-get install -y --no-install-recommends \
                       build-essential \
-                      postgresql-server-dev-16 \
-                      git \
-                      ca-certificates
+                      postgresql-16 \
+                      postgresql-server-dev-16
 
             - name: Install Clang compiler
               run: |
@@ -82,6 +68,18 @@ jobs:
             - name: Install Python dependencies
               run: |
                   pip install -r requirements.txt
+
+            - name: Start PostgreSQL and create test database
+              run: |
+                  # Start PostgreSQL service
+                  sudo systemctl start postgresql
+
+                  # Create test database and user
+                  sudo -u postgres createdb test_db
+                  sudo -u postgres psql -c "ALTER USER postgres PASSWORD 'postgres';"
+
+                  # Verify PostgreSQL is running
+                  sudo -u postgres psql -c "SELECT version();"
 
             - name: Create extension in test database
               env:
