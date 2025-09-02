@@ -43,17 +43,45 @@ jobs:
             - name: Install PostgreSQL development packages
               run: |
                   sudo apt-get update
-                  sudo apt-get install -y postgresql-server-dev-16 build-essential
+                  sudo apt-get install -y --no-install-recommends \
+                      build-essential \
+                      postgresql-server-dev-16 \
+                      git \
+                      ca-certificates
+
+            - name: Install Clang compiler
+              run: |
+                  # Detect required clang version from PostgreSQL build configuration
+                  REQUIRED_CLANG=$(pg_config --configure | grep -oP 'clang-\K[0-9]+' | head -1)
+                  
+                  if [ -z "$REQUIRED_CLANG" ]; then
+                      # Check PostgreSQL's Makefile.global for clang version
+                      if [ -f "/usr/lib/postgresql/16/lib/pgxs/src/Makefile.global" ]; then
+                          REQUIRED_CLANG=$(grep -oP '/usr/bin/clang-\K[0-9]+' /usr/lib/postgresql/16/lib/pgxs/src/Makefile.global | head -1)
+                      fi
+                  fi
+                  
+                  if [ -z "$REQUIRED_CLANG" ]; then
+                      echo "Could not detect required clang version, installing default clang..."
+                      sudo apt-get install -y --no-install-recommends clang llvm
+                  else
+                      echo "Installing clang-$REQUIRED_CLANG and llvm-$REQUIRED_CLANG..."
+                      sudo apt-get install -y --no-install-recommends \
+                          clang-$REQUIRED_CLANG \
+                          llvm-$REQUIRED_CLANG
+                      sudo ln -sf /usr/bin/clang-$REQUIRED_CLANG /usr/bin/clang
+                      sudo ln -sf /usr/bin/clang++-$REQUIRED_CLANG /usr/bin/clang++
+                  fi
 
             - name: Install Python dependencies
               run: |
-                  pip install numpy scipy psycopg2-binary
+                  pip install -r requirements.txt
 
             - name: Build and install extension
               run: |
                   make clean
-                  make
-                  sudo make install
+                  make USE_PGXS=1
+                  make USE_PGXS=1 install
 
             - name: Create extension in test database
               env:
@@ -81,50 +109,6 @@ jobs:
                     --user postgres \
                     --password postgres
 
-    regression-tests:
-        name: PostgreSQL Regression Tests
-        runs-on: ubuntu-latest
-
-        services:
-            postgres:
-                image: postgres:15
-                env:
-                    POSTGRES_USER: postgres
-                    POSTGRES_PASSWORD: postgres
-                    POSTGRES_DB: test_db
-                ports:
-                    - 5432:5432
-                options: >-
-                    --health-cmd pg_isready
-                    --health-interval 10s
-                    --health-timeout 5s
-                    --health-retries 5
-
-        steps:
-            - name: Checkout code
-              uses: actions/checkout@v4
-
-            - name: Install PostgreSQL development packages
-              run: |
-                  sudo apt-get update
-                  sudo apt-get install -y postgresql-server-dev-15 build-essential
-
-            - name: Build and install extension
-              run: |
-                  make clean
-                  make
-                  sudo make install
-
-            - name: Create extension in test database
-              env:
-                  PGHOST: localhost
-                  PGPORT: 5432
-                  PGUSER: postgres
-                  PGPASSWORD: postgres
-                  PGDATABASE: test_db
-              run: |
-                  psql -c "CREATE EXTENSION weighted_statistics;"
-
             - name: Run regression tests
               env:
                   TEST_DATABASE: test_db
@@ -145,7 +129,7 @@ jobs:
     docker-build-push:
         name: Build and Push Docker Image
         runs-on: ubuntu-latest
-        needs: [python-validation, regression-tests]
+        needs: [python-validation]
         if: github.event_name != 'pull_request'
 
         permissions:
