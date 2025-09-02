@@ -10,6 +10,7 @@ on:
 env:
     REGISTRY: ghcr.io
     IMAGE_NAME: ${{ github.repository }}
+    PG_VERSION: 16
 
 jobs:
     python-validation:
@@ -32,8 +33,8 @@ jobs:
                   sudo apt-get update
                   sudo apt-get install -y --no-install-recommends \
                       build-essential \
-                      postgresql-16 \
-                      postgresql-server-dev-16
+                      postgresql-${{ env.PG_VERSION }} \
+                      postgresql-server-dev-${{ env.PG_VERSION }}
 
             - name: Install Clang compiler
               run: |
@@ -42,8 +43,8 @@ jobs:
 
                   if [ -z "$REQUIRED_CLANG" ]; then
                       # Check PostgreSQL's Makefile.global for clang version
-                      if [ -f "/usr/lib/postgresql/16/lib/pgxs/src/Makefile.global" ]; then
-                          REQUIRED_CLANG=$(grep -oP '/usr/bin/clang-\K[0-9]+' /usr/lib/postgresql/16/lib/pgxs/src/Makefile.global | head -1)
+                      if [ -f "/usr/lib/postgresql/${{ env.PG_VERSION }}/lib/pgxs/src/Makefile.global" ]; then
+                          REQUIRED_CLANG=$(grep -oP '/usr/bin/clang-\K[0-9]+' /usr/lib/postgresql/${{ env.PG_VERSION }}/lib/pgxs/src/Makefile.global | head -1)
                       fi
                   fi
 
@@ -157,7 +158,7 @@ jobs:
                       # Git short commit SHA
                       type=sha,prefix={{branch}}-,format=short
                       # PostGIS version matching base image
-                      type=raw,value=pg16-postgis3.5,enable={{is_default_branch}}
+                      type=raw,value=pg${{ env.PG_VERSION }}-postgis3.5,enable={{is_default_branch}}
             - name: Build and push Docker image
               id: push
               uses: docker/build-push-action@v6
