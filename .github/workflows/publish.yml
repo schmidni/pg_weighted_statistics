@@ -53,14 +53,14 @@ jobs:
               run: |
                   # Detect required clang version from PostgreSQL build configuration
                   REQUIRED_CLANG=$(pg_config --configure | grep -oP 'clang-\K[0-9]+' | head -1)
-                  
+
                   if [ -z "$REQUIRED_CLANG" ]; then
                       # Check PostgreSQL's Makefile.global for clang version
                       if [ -f "/usr/lib/postgresql/16/lib/pgxs/src/Makefile.global" ]; then
                           REQUIRED_CLANG=$(grep -oP '/usr/bin/clang-\K[0-9]+' /usr/lib/postgresql/16/lib/pgxs/src/Makefile.global | head -1)
                       fi
                   fi
-                  
+
                   if [ -z "$REQUIRED_CLANG" ]; then
                       echo "Could not detect required clang version, installing default clang..."
                       sudo apt-get install -y --no-install-recommends clang llvm
@@ -73,15 +73,15 @@ jobs:
                       sudo ln -sf /usr/bin/clang++-$REQUIRED_CLANG /usr/bin/clang++
                   fi
 
-            - name: Install Python dependencies
-              run: |
-                  pip install -r requirements.txt
-
             - name: Build and install extension
               run: |
                   make clean
                   make USE_PGXS=1
-                  make USE_PGXS=1 install
+                  sudo make USE_PGXS=1 install
+
+            - name: Install Python dependencies
+              run: |
+                  pip install -r requirements.txt
 
             - name: Create extension in test database
               env:
