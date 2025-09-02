@@ -1,0 +1,32 @@
+# Git files
+.git
+.gitignore
+.github
+
+# Build artifacts
+*.o
+*.so
+*.dylib
+
+# Test results
+test/results/
+benchmark/results/
+
+# Documentation
+*.md
+docs/
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# Local development files
+.env
+.env.local

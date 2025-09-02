@@ -1,0 +1,195 @@
+name: CI/CD Pipeline
+
+on:
+    push:
+        branches: [main]
+    pull_request:
+        branches: [main]
+    workflow_dispatch:
+
+env:
+    REGISTRY: ghcr.io
+    IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+    python-validation:
+        name: Python Reference Validation
+        runs-on: ubuntu-latest
+
+        services:
+            postgres:
+                image: postgres:16
+                env:
+                    POSTGRES_USER: postgres
+                    POSTGRES_PASSWORD: postgres
+                    POSTGRES_DB: test_db
+                ports:
+                    - 5432:5432
+                options: >-
+                    --health-cmd pg_isready
+                    --health-interval 10s
+                    --health-timeout 5s
+                    --health-retries 5
+
+        steps:
+            - name: Checkout code
+              uses: actions/checkout@v4
+
+            - name: Set up Python
+              uses: actions/setup-python@v5
+              with:
+                  python-version: '3.11'
+
+            - name: Install PostgreSQL development packages
+              run: |
+                  sudo apt-get update
+                  sudo apt-get install -y postgresql-server-dev-16 build-essential
+
+            - name: Install Python dependencies
+              run: |
+                  pip install numpy scipy psycopg2-binary
+
+            - name: Build and install extension
+              run: |
+                  make clean
+                  make
+                  sudo make install
+
+            - name: Create extension in test database
+              env:
+                  PGHOST: localhost
+                  PGPORT: 5432
+                  PGUSER: postgres
+                  PGPASSWORD: postgres
+                  PGDATABASE: test_db
+              run: |
+                  psql -c "CREATE EXTENSION weighted_statistics;"
+
+            - name: Run Python validation tests
+              env:
+                  PGHOST: localhost
+                  PGPORT: 5432
+                  PGUSER: postgres
+                  PGPASSWORD: postgres
+                  PGDATABASE: test_db
+              run: |
+                  cd reference
+                  python validate_against_reference.py \
+                    --host localhost \
+                    --port 5432 \
+                    --database test_db \
+                    --user postgres \
+                    --password postgres
+
+    regression-tests:
+        name: PostgreSQL Regression Tests
+        runs-on: ubuntu-latest
+
+        services:
+            postgres:
+                image: postgres:15
+                env:
+                    POSTGRES_USER: postgres
+                    POSTGRES_PASSWORD: postgres
+                    POSTGRES_DB: test_db
+                ports:
+                    - 5432:5432
+                options: >-
+                    --health-cmd pg_isready
+                    --health-interval 10s
+                    --health-timeout 5s
+                    --health-retries 5
+
+        steps:
+            - name: Checkout code
+              uses: actions/checkout@v4
+
+            - name: Install PostgreSQL development packages
+              run: |
+                  sudo apt-get update
+                  sudo apt-get install -y postgresql-server-dev-15 build-essential
+
+            - name: Build and install extension
+              run: |
+                  make clean
+                  make
+                  sudo make install
+
+            - name: Create extension in test database
+              env:
+                  PGHOST: localhost
+                  PGPORT: 5432
+                  PGUSER: postgres
+                  PGPASSWORD: postgres
+                  PGDATABASE: test_db
+              run: |
+                  psql -c "CREATE EXTENSION weighted_statistics;"
+
+            - name: Run regression tests
+              env:
+                  TEST_DATABASE: test_db
+                  TEST_USER: postgres
+                  TEST_HOST: localhost
+                  TEST_PORT: 5432
+                  PGPASSWORD: postgres
+              run: |
+                  ./test/run_tests.sh
+
+            - name: Upload test results
+              if: always()
+              uses: actions/upload-artifact@v4
+              with:
+                  name: regression-test-results
+                  path: test/results/
+
+    docker-build-push:
+        name: Build and Push Docker Image
+        runs-on: ubuntu-latest
+        needs: [python-validation, regression-tests]
+        if: github.event_name != 'pull_request'
+
+        permissions:
+            contents: read
+            packages: write
+
+        steps:
+            - name: Checkout code
+              uses: actions/checkout@v4
+
+            - name: Set up QEMU
+              uses: docker/setup-qemu-action@v3
+
+            - name: Set up Docker Buildx
+              uses: docker/setup-buildx-action@v3
+
+            - name: Log in to Container Registry
+              uses: docker/login-action@v3
+              with:
+                  registry: ${{ env.REGISTRY }}
+                  username: ${{ github.actor }}
+                  password: ${{ secrets.GITHUB_TOKEN }}
+
+            - name: Extract metadata
+              id: meta
+              uses: docker/metadata-action@v5
+              with:
+                  images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+                  tags: |
+                      type=ref,event=branch
+                      type=ref,event=pr
+                      type=sha,prefix={{branch}}-
+                      type=raw,value=latest,enable={{is_default_branch}}
+
+            - name: Build and push Docker image
+              uses: docker/build-push-action@v5
+              with:
+                  context: .
+                  platforms: linux/amd64,linux/arm64
+                  push: true
+                  tags: ${{ steps.meta.outputs.tags }}
+                  labels: |
+                      ${{ steps.meta.outputs.labels }}
+                      org.opencontainers.image.title=PostgreSQL Weighted Statistics Extension
+                      org.opencontainers.image.description=High-performance weighted statistics functions for PostgreSQL
+                      org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+                      org.opencontainers.image.licenses=MIT
